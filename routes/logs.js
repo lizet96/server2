@@ -19,33 +19,73 @@ router.get('/', async (req, res) => {
   }
 });
 
-// New endpoint to get response time data
+// Updated endpoint to get response time data
 router.get('/response-time', async (req, res) => {
   try {
     const db = getFirestore();
+    console.log('Fetching response time data from Firestore');
+    
     const logsSnapshot = await db.collection('logs')
       .orderBy('timestamp', 'desc')
-      .limit(20)
+      .limit(50) // Increased limit to get more data points
       .get();
     
     const responseTimes = [];
     
     logsSnapshot.forEach(doc => {
       const data = doc.data();
-      if (data.responseTime) {
+      
+      // More robust check for responseTime
+      if (data.responseTime !== undefined) {
+        // Parse responseTime properly
+        let responseTimeValue;
+        
+        if (typeof data.responseTime === 'number') {
+          responseTimeValue = data.responseTime;
+        } else if (typeof data.responseTime === 'string') {
+          // Handle cases like "123ms" by removing non-numeric characters
+          responseTimeValue = parseInt(data.responseTime.replace(/[^0-9]/g, ''));
+        } else {
+          responseTimeValue = 0;
+        }
+        
+        // Format timestamp consistently
+        let timestamp;
+        if (data.timestamp && typeof data.timestamp === 'object' && data.timestamp.toDate) {
+          // Handle Firestore Timestamp objects
+          timestamp = data.timestamp.toDate().toISOString();
+        } else if (data.timestamp && typeof data.timestamp === 'object' && data.timestamp.seconds) {
+          // Handle Firestore Timestamp-like objects
+          timestamp = new Date(data.timestamp.seconds * 1000).toISOString();
+        } else if (typeof data.timestamp === 'string') {
+          // Already a string, ensure it's a valid date
+          try {
+            timestamp = new Date(data.timestamp).toISOString();
+          } catch (e) {
+            timestamp = new Date().toISOString();
+          }
+        } else {
+          // Fallback
+          timestamp = new Date().toISOString();
+        }
+        
+        // Always explicitly set server to server2 for this server's logs
         responseTimes.push({
-          timestamp: data.timestamp,
-          responseTime: parseInt(data.responseTime),
-          server: data.server || 'server2',
-          endpoint: data.path || data.url
+          timestamp: timestamp,
+          responseTime: responseTimeValue,
+          server: 'server2', // Explicitly set server to server2
+          endpoint: data.path || data.url || 'unknown'
         });
       }
     });
 
+    console.log(`Returning ${responseTimes.length} response time records`);
+    console.log('Sample response time data:', responseTimes.slice(0, 2));
+    
     res.json(responseTimes);
   } catch (error) {
     console.error('Error fetching response times:', error);
-    res.status(500).json({ error: 'Failed to fetch response times' });
+    res.status(500).json({ error: 'Failed to fetch response times', details: error.message });
   }
 });
 
